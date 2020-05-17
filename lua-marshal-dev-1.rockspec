@@ -1,5 +1,5 @@
 package = "lua-marshal"
-version = "dev-1"
+version = "v1.0"
 source = {
     url = "git+https://github.com/joe7575/lua-marshal.git"
 }
