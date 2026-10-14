@@ -41,6 +41,7 @@
 #define MAR_TREF 1
 #define MAR_TVAL 2
 #define MAR_TUSR 3
+#define MAR_TSKIP 4
 
 #define MAR_CHR 1
 #define MAR_I32 4
@@ -204,7 +205,10 @@ static void mar_encode_value(lua_State *L, mar_Buffer *buf, int val, size_t *idx
             lua_pushvalue(L, -1);
             lua_getinfo(L, ">nuS", &ar);
             if (ar.what[0] != 'L') {
-                luaL_error(L, "attempt to persist a C function '%s'", ar.name);
+                /* tolerant: cannot persist a C function, store nil instead */
+                tag = MAR_TSKIP;
+                buf_write(L, (void*)&tag, MAR_CHR, buf);
+                break;
             }
             tag = MAR_TVAL;
             lua_pushvalue(L, -1);
@@ -274,17 +278,22 @@ static void mar_encode_value(lua_State *L, mar_Buffer *buf, int val, size_t *idx
 
                 buf_write(L, (void*)&tag, MAR_CHR, buf);
                 buf_write(L, (void*)&rec_buf.head, MAR_I32, buf);
-		buf_write(L, rec_buf.data, rec_buf.head, buf);
-		buf_done(L, &rec_buf);
+                buf_write(L, rec_buf.data, rec_buf.head, buf);
+                buf_done(L, &rec_buf);
             }
             else {
-                luaL_error(L, "attempt to encode userdata (no __persist hook)");
+                /* tolerant: cannot persist userdata without __persist, store nil */
+                tag = MAR_TSKIP;
+                buf_write(L, (void*)&tag, MAR_CHR, buf);
+                break;
             }
             lua_pop(L, 1);
         }
         break;
     }
-    case LUA_TNIL: break;
+    case LUA_TNIL:
+    case LUA_TTHREAD:
+        break;
     default:
         luaL_error(L, "invalid value type (%s)", lua_typename(L, val_type));
     }
@@ -371,6 +380,9 @@ static void mar_decode_value
             int ref;
             mar_next_len(ref, int);
             lua_rawgeti(L, SEEN_IDX, ref);
+        }
+        else if (tag == MAR_TSKIP) {
+            lua_pushnil(L);
         }
         else {
             mar_next_len(l, uint32_t);
@@ -535,7 +547,7 @@ static const luaL_reg R[] =
     {"encode",      mar_encode},
     {"decode",      mar_decode},
     {"clone",       mar_clone},
-    {NULL,	    NULL}
+    {NULL,          NULL}
 };
 
 int luaopen_marshal(lua_State *L)
